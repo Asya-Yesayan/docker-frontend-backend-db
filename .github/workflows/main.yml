@@ -1,0 +1,62 @@
+name: Build and Push Frontend & Backend Images
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-scan:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      FRONTEND_IMAGE: ${{ secrets.ECR_FRONTEND_REPO }}:latest
+      BACKEND_IMAGE: ${{ secrets.ECR_BACKEND_REPO }}:latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build Frontend Docker Image
+      run: |
+        docker build -t $FRONTEND_IMAGE ./frontend
+
+    - name: Build Backend Docker Image
+      run: |
+        docker build -t $BACKEND_IMAGE ./backend
+
+    - name: Scan Frontend with Trivy
+      uses: aquasecurity/trivy-action@v0.16.1
+      with:
+        image-ref: ${{ env.FRONTEND_IMAGE }}
+        format: 'table'
+        exit-code: '1'
+        ignore-unfixed: true
+
+    - name: Scan Backend with Trivy
+      uses: aquasecurity/trivy-action@v0.16.1
+      with:
+        image-ref: ${{ env.BACKEND_IMAGE }}
+        format: 'table'
+        exit-code: '1'
+        ignore-unfixed: true
+
+    - name: Push Frontend Image to ECR
+      run: |
+        docker push $FRONTEND_IMAGE
+
+    - name: Push Backend Image to ECR
+      run: |
+        docker push $BACKEND_IMAGE
