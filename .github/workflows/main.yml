@@ -1,62 +1,65 @@
-name: Build and Push Frontend & Backend Images
+name: Build & Push Docker Images to ECR
 
 on:
   push:
     branches:
       - master
 
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+
 jobs:
-  build-and-scan:
+  build-and-push:
     runs-on: ubuntu-latest
 
-    env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      FRONTEND_IMAGE: ${{ secrets.ECR_FRONTEND_REPO }}:latest
-      BACKEND_IMAGE: ${{ secrets.ECR_BACKEND_REPO }}:latest
-
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
 
-    - name: Build Frontend Docker Image
-      run: |
-        docker build -t $FRONTEND_IMAGE ./frontend
+      - name: Set up Docker tags
+        id: vars
+        run: |
+          echo "ECR_FRONTEND=${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_FRONTEND }}:latest" >> $GITHUB_ENV
+          echo "ECR_BACKEND=${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_BACKEND }}:latest" >> $GITHUB_ENV
 
-    - name: Build Backend Docker Image
-      run: |
-        docker build -t $BACKEND_IMAGE ./backend
+      - name: Build frontend Docker image
+        run: |
+          docker build -t $ECR_FRONTEND ./frontend
 
-    - name: Scan Frontend with Trivy
-      uses: aquasecurity/trivy-action@v0.12.0
-      with:
-        image-ref: ${{ env.FRONTEND_IMAGE }}
-        format: 'table'
-        exit-code: '1'
-        ignore-unfixed: true
+      - name: Build backend Docker image
+        run: |
+          docker build -t $ECR_BACKEND ./backend
 
-    - name: Scan Backend with Trivy
-      uses: aquasecurity/trivy-action@v0.16.1
-      with:
-        image-ref: ${{ env.BACKEND_IMAGE }}
-        format: 'table'
-        exit-code: '1'
-        ignore-unfixed: true
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.1_Linux-64bit.deb
+          sudo dpkg -i trivy_0.50.1_Linux-64bit.deb
 
-    - name: Push Frontend Image to ECR
-      run: |
-        docker push $FRONTEND_IMAGE
+      - name: Scan frontend with Trivy
+        run: |
+          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_FRONTEND
 
-    - name: Push Backend Image to ECR
-      run: |
-        docker push $BACKEND_IMAGE
+      - name: Scan backend with Trivy
+        run: |
+          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_BACKEND
+
+      - name: Push frontend image to ECR
+        run: |
+          docker push $ECR_FRONTEND
+
+      - name: Push backend image to ECR
+        run: |
+          docker push $ECR_BACKEND
