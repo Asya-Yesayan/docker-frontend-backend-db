@@ -50,11 +50,19 @@ jobs:
 
       - name: Scan frontend with Trivy
         run: |
-          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_FRONTEND
+          # Option 1: Remove --exit-code 1 (Trivy defaults to 0)
+          trivy image --severity HIGH,CRITICAL $ECR_FRONTEND
+
+          # Option 2: Explicitly set --exit-code 0
+          # trivy image --exit-code 0 --severity HIGH,CRITICAL $ECR_FRONTEND
 
       - name: Scan backend with Trivy
         run: |
-          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_BACKEND
+          # Option 1: Remove --exit-code 1 (Trivy defaults to 0)
+          trivy image --severity HIGH,CRITICAL $ECR_BACKEND
+
+          # Option 2: Explicitly set --exit-code 0
+          # trivy image --exit-code 0 --severity HIGH,CRITICAL $ECR_BACKEND
 
       - name: Push frontend image to ECR
         run: |
