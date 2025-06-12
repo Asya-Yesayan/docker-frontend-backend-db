@@ -1,0 +1,19 @@
+---
+- name: Configure EC2 and Deploy Docker App
+  hosts: ec2_instance
+  become: yes # Run tasks with sudo privileges
+  gather_facts: yes # Gather facts about the remote host
+
+  vars:
+    # ECR details passed from GitHub Actions
+    ecr_registry_url: "{{ lookup('env', 'ECR_REGISTRY_URL') }}"
+    ecr_frontend_repo: "{{ lookup('env', 'ECR_REPOSITORY_FRONTEND') }}"
+    ecr_backend_repo: "{{ lookup('env', 'ECR_REPOSITORY_BACKEND') }}"
+
+  roles:
+    - role: common
+    - role: docker-app
+      vars:
+        # Pass Docker image names to the role
+        frontend_image: "{{ ecr_registry_url }}/{{ ecr_frontend_repo }}:latest"
+        backend_image: "{{ ecr_registry_url }}/{{ ecr_backend_repo }}:latest"
