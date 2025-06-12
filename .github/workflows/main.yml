@@ -3,7 +3,7 @@ name: Build & Push Docker Images to ECR
 on:
   push:
     branches:
-      - master
+      - master # Or main, depending on your default branch name
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
@@ -11,56 +11,75 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # Allow checkout
+      id-token: write # Required for aws-actions/configure-aws-credentials with OIDC
+      packages: write # If you push to GitHub Packages (not ECR directly here, but good practice)
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Recommended to use the latest stable version
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4 # Recommended to use the latest stable version
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+          # If you are using OIDC, you would remove the above two lines and use:
+          # role-to-assume: arn:aws:iam::YOUR_AWS_ACCOUNT_ID:role/YOUR_GITHUB_ACTIONS_OIDC_ROLE
+          # role-session-name: GitHubActionsSession
 
       - name: Log in to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2 # Recommended to use the latest stable version
 
       - name: Set up Docker tags
         id: vars
         run: |
-          echo "ECR_FRONTEND=${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_FRONTEND }}:latest" >> $GITHUB_ENV
-          echo "ECR_BACKEND=${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_BACKEND }}:latest" >> $GITHUB_ENV
+          # Use the registry output from the ECR login step
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          echo "ECR_FRONTEND=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_FRONTEND }}:latest" >> $GITHUB_ENV
+          echo "ECR_BACKEND=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_BACKEND }}:latest" >> $GITHUB_ENV
+          # Add a tag with the commit SHA for better traceability
+          echo "ECR_FRONTEND_SHA=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}" >> $GITHUB_ENV
+          echo "ECR_BACKEND_SHA=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_BACKEND }}:${{ github.sha }}" >> $GITHUB_ENV
 
       - name: Build frontend Docker image
         run: |
-          docker build -t $ECR_FRONTEND ./frontend
+          docker build -t $ECR_FRONTEND -t $ECR_FRONTEND_SHA ./frontend # Tag with both latest and SHA
 
       - name: Build backend Docker image
         run: |
-          docker build -t $ECR_BACKEND ./backend
+          docker build -t $ECR_BACKEND -t $ECR_BACKEND_SHA ./backend # Tag with both latest and SHA
 
       - name: Install Trivy
         run: |
-          sudo apt-get install wget apt-transport-https gnupg lsb-release
-          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo sudpkg -i trivy_0.50.1_Linux-64bit.deb || apt-get install -f -y
+          # The original apt-get install was missing a key, and the dpkg command was incorrect.
+          # This is the recommended way to install Trivy.
           sudo apt-get update
-          sudo apt-get install trivy
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
 
       - name: Scan frontend with Trivy
+        # It's better to use the SHA tagged image for scanning to ensure consistency
         run: |
-          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_FRONTEND
+          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_FRONTEND_SHA
 
       - name: Scan backend with Trivy
+        # It's better to use the SHA tagged image for scanning to ensure consistency
         run: |
-          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_BACKEND
+          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_BACKEND_SHA
 
       - name: Push frontend image to ECR
         run: |
-          docker push $ECR_FRONTEND
+          docker push $ECR_FRONTEND # Push both latest and SHA tags
+          docker push $ECR_FRONTEND_SHA
 
       - name: Push backend image to ECR
         run: |
-          docker push $ECR_BACKEND
+          docker push $ECR_BACKEND # Push both latest and SHA tags
+          docker push $ECR_BACKEND_SHA
